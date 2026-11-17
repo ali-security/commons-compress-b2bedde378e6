@@ -109,6 +109,84 @@ public class TarArchiveInputStreamTest {
         tais.close();
     }
 
+    @Test(expected = IOException.class)
+    public void rejectsPaxHeaderValueLargerThanHeaderRecord() throws Exception {
+        final byte[] content = "2147483647 foo=bar\n".getBytes(CharsetNames.UTF_8);
+        final byte[] archive = createArchiveWithPaxHeader(content, content.length);
+        try (TarArchiveInputStream tais = new TarArchiveInputStream(new ByteArrayInputStream(archive))) {
+            tais.getNextTarEntry();
+        }
+    }
+
+    @Test(expected = IOException.class)
+    public void rejectsPaxHeaderValueLargerThanHeaderRecordForGlobalHeaders() throws Exception {
+        final byte[] content = "2147483647 foo=bar\n".getBytes(CharsetNames.UTF_8);
+        final byte[] archive = createArchiveWithPaxHeader(content, content.length,
+            TarConstants.LF_PAX_GLOBAL_EXTENDED_HEADER);
+        try (TarArchiveInputStream tais = new TarArchiveInputStream(new ByteArrayInputStream(archive))) {
+            tais.getNextTarEntry();
+        }
+    }
+
+    @Test(expected = IOException.class)
+    public void doesntAllocateHugeBufferForTruncatedPaxHeaderWithLyingSize() throws Exception {
+        // header claims to be 4 GiB big but the archive ends after a single record
+        final byte[] content = "2147483000 foo=bar\n".getBytes(CharsetNames.UTF_8);
+        final byte[] archive = createArchiveWithPaxHeader(content, 1L << 32);
+        try (TarArchiveInputStream tais = new TarArchiveInputStream(new ByteArrayInputStream(archive))) {
+            tais.getNextTarEntry();
+        }
+    }
+
+    @Test
+    public void overflowingPaxHeaderLengthDoesntCauseRuntimeException() throws Exception {
+        final byte[] content = "3000000000 foo=bar\n".getBytes(CharsetNames.UTF_8);
+        final byte[] archive = createArchiveWithPaxHeader(content, content.length);
+        try (TarArchiveInputStream tais = new TarArchiveInputStream(new ByteArrayInputStream(archive))) {
+            final TarArchiveEntry entry = tais.getNextTarEntry();
+            assertEquals("test.txt", entry.getName());
+        }
+    }
+
+    @Test
+    public void parsePaxHeadersRejectsValueExceedingHeaderSize() throws Exception {
+        final InputStream is = new ByteArrayInputStream(new byte[1]);
+        try (TarArchiveInputStream tais = new TarArchiveInputStream(is)) {
+            tais.parsePaxHeaders(new ByteArrayInputStream("1073741824 foo=bar\n"
+                .getBytes(CharsetNames.UTF_8)), 19);
+            fail("Expected IOException");
+        } catch (final IOException expected) {
+            assertTrue(expected.getMessage().contains("exceeds size of header record"));
+        }
+    }
+
+    private static byte[] createArchiveWithPaxHeader(final byte[] paxContent, final long claimedSize)
+        throws IOException {
+        return createArchiveWithPaxHeader(paxContent, claimedSize, TarConstants.LF_PAX_EXTENDED_HEADER_LC);
+    }
+
+    private static byte[] createArchiveWithPaxHeader(final byte[] paxContent, final long claimedSize,
+        final byte paxType) throws IOException {
+        final ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        final byte[] record = new byte[TarConstants.DEFAULT_RCDSIZE];
+        final TarArchiveEntry pax = new TarArchiveEntry("./PaxHeaders.X/test.txt", paxType);
+        pax.setSize(claimedSize);
+        pax.writeEntryHeader(record);
+        bos.write(record);
+        final byte[] data = new byte[TarConstants.DEFAULT_RCDSIZE];
+        System.arraycopy(paxContent, 0, data, 0, paxContent.length);
+        bos.write(data);
+        if (claimedSize == paxContent.length) {
+            final byte[] fileRecord = new byte[TarConstants.DEFAULT_RCDSIZE];
+            final TarArchiveEntry file = new TarArchiveEntry("test.txt");
+            file.setSize(0);
+            file.writeEntryHeader(fileRecord);
+            bos.write(fileRecord);
+            bos.write(new byte[2 * TarConstants.DEFAULT_RCDSIZE]);
+        }
+        return bos.toByteArray();
+    }
+
     @Test
     public void workaroundForBrokenTimeHeader() throws Exception {
         TarArchiveInputStream in = null;
