@@ -425,6 +425,37 @@ public class SevenZFileTest extends AbstractTestCase {
         assertArchiveIsRejected(createArchive(packed, header.toByteArray()), "premature end of stream");
     }
 
+    @Test(timeout = 30000)
+    public void rejectsEncodedHeaderWithCyclicCoderChain() throws Exception {
+        final byte[] packed = new byte[] { 1, 2, 3, 4 };
+        final ByteArrayOutputStream header = new ByteArrayOutputStream();
+        header.write(NID.kEncodedHeader);
+        writePackInfo(header, packed.length);
+        header.write(NID.kUnpackInfo);
+        header.write(NID.kFolder);
+        writeUint64(header, 1); // number of folders
+        header.write(0); // not external
+        writeUint64(header, 2); // number of coders
+        header.write(0x11); // complex coder with one byte method id
+        header.write(0x00); // COPY
+        writeUint64(header, 2); // numInStreams
+        writeUint64(header, 1); // numOutStreams
+        header.write(0x01); // simple coder with one byte method id
+        header.write(0x00); // COPY
+        // single bind pair binding coder 0's output to its own input
+        writeUint64(header, 0); // inIndex
+        writeUint64(header, 0); // outIndex
+        writeUint64(header, 0); // packed stream index
+        writeUint64(header, 0); // packed stream index
+        header.write(NID.kCodersUnpackSize);
+        writeUint64(header, packed.length);
+        writeUint64(header, packed.length);
+        header.write(NID.kEnd);
+        header.write(NID.kEnd); // end of streams info
+        assertArchiveIsRejected(createArchive(packed, header.toByteArray()),
+            "same coder more than once");
+    }
+
     private static void assertArchiveIsRejected(final byte[] archive, final String expectedMessage)
         throws Exception {
         try (SevenZFile sevenZFile = new SevenZFile(new SeekableInMemoryByteChannel(archive))) {

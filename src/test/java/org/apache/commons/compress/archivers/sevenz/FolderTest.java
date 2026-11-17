@@ -18,9 +18,13 @@
  */
 package org.apache.commons.compress.archivers.sevenz;
 
+import java.io.IOException;
+
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 
 /**
@@ -81,6 +85,27 @@ public class FolderTest {
         folder.bindPairs = bindPairArray;
 
         assertEquals(0, folder.findBindPairForInStream(0));
+
+    }
+
+
+    @Test(timeout = 10000)
+    public void testGetOrderedCodersRejectsCyclicCoderChain() {
+
+        Folder folder = new Folder();
+        folder.coders = new Coder[] { new Coder(), new Coder() };
+        BindPair bindPair = new BindPair();
+        bindPair.inIndex = 0;
+        bindPair.outIndex = 0;
+        folder.bindPairs = new BindPair[] { bindPair };
+        folder.packedStreams = new long[] { 0 };
+
+        try {
+            folder.getOrderedCoders();
+            fail("expected cyclic coder chain to be rejected");
+        } catch (final IOException ex) {
+            assertTrue(ex.getMessage().contains("same coder more than once"));
+        }
 
     }
 
