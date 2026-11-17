@@ -20,6 +20,9 @@ package org.apache.commons.compress.archivers.zip;
 
 import static org.junit.Assert.*;
 
+import java.util.zip.CRC32;
+import java.util.zip.ZipException;
+
 import org.junit.Test;
 
 /**
@@ -137,6 +140,42 @@ public class AsiExtraFieldTest implements UnixStat {
             fail("should raise bad CRC exception");
         } catch (final Exception e) {
             assertEquals("bad CRC checksum 0 instead of ebf018e",
+                         e.getMessage());
+        }
+    }
+
+    @Test
+    public void testReparseRejectsHugeLinkLength() throws Exception {
+        assertBadLinkLength(new byte[] {(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, 0x7F}, 2147483647);
+    }
+
+    @Test
+    public void testReparseRejectsNegativeLinkLength() throws Exception {
+        assertBadLinkLength(new byte[] {(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF}, -1);
+    }
+
+    @Test
+    public void testReparseRejectsLinkLengthBeyondData() throws Exception {
+        assertBadLinkLength(new byte[] {5, 0, 0, 0}, 5);
+    }
+
+    private static void assertBadLinkLength(final byte[] linkLength, final int expected) throws Exception {
+        final byte[] payload = {0123, (byte)0xA0,                     // mode
+                                linkLength[0], linkLength[1],
+                                linkLength[2], linkLength[3],         // link length
+                                5, 0, 6, 0,                           // uid, gid
+                                (byte)'t', (byte)'e', (byte)'s', (byte)'t'};
+        final CRC32 crc = new CRC32();
+        crc.update(payload);
+        final byte[] data = new byte[payload.length + 4];
+        System.arraycopy(ZipLong.getBytes(crc.getValue()), 0, data, 0, 4);
+        System.arraycopy(payload, 0, data, 4, payload.length);
+        final AsiExtraField a = new AsiExtraField();
+        try {
+            a.parseFromLocalFileData(data, 0, data.length);
+            fail("should raise bad link length exception");
+        } catch (final ZipException e) {
+            assertEquals("Bad symbolic link name length " + expected + " in ASI extra field",
                          e.getMessage());
         }
     }
